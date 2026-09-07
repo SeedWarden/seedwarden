@@ -1,2 +1,2 @@
 # seedwarden
-Password Manager for SeedSigner hardware
+Password Manager for SeedSigner hardware.
