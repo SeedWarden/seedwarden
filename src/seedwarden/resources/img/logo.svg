@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512" height="512"
+     viewBox="0 0 512 512">
+
+  <style>
+    path.outline {
+      fill: none;
+      stroke: #FF6A00;
+      stroke-width: 10;
+      stroke-linejoin: miter;
+    }
+
+    text { 
+      font-family: Courier new, sans-serif;
+      font-size: 110px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    text.left {
+      text-anchor: end;
+      fill: #FF6A00;
+    }
+
+    text.right {
+      text-anchor: start;
+      fill: #f0f0f0;
+    }
+  </style>
+
+  <path
+        d="M256 10 H472V338 C472 420 364 452 256 502 Z"
+        fill="#FF6A00"/>
+
+  <path
+        d="M256 10 V502 C148 452 40 420 40 338 V10 Z"
+        fill="#f0f0f0"/>
+
+  <path
+        d="M472 10 V338 C472 420 364 452 256 502 C148 452 40 420 40 338 V10 Z"
+        class="outline"/>
+
+<text x="255" y="150" class="left">SE</text>
+<text x="257" y="150" class="right">ED</text>
+<text x="255" y="260" class="left">WAR</text>
+<text x="257" y="260" class="right">DEN</text>
+</svg>
