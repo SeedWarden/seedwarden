@@ -1,5 +1,7 @@
 import os
 
+from seedwarden.helpers import Convert
+
 
 class Scalar:
     """
@@ -89,7 +91,9 @@ class Share:
         self.y = y
 
     def serialize_qr(self) -> str:
-        return f"seedwarden:sss:{self.id}:{self.x}:{self.y}"
+        y_bytes = int(self.y).to_bytes(32, "big", signed=False)
+        qr = f"seedwarden:sss:{self.id}:{self.x}:{Convert.bytes_to_base64str(y_bytes)}"
+        return qr
 
     @staticmethod
     def deserialize_qr(qr: str) -> Share:
@@ -99,7 +103,8 @@ class Share:
         assert parts[1] == "sss"
         id = parts[2]
         x = Scalar(int(parts[3]))
-        y = Scalar(int(parts[4]))
+        y_bytes = Convert.base64str_to_bytes(parts[4])
+        y = Scalar(int.from_bytes(y_bytes, "big", signed=False))
         return Share(id, x, y)
 
     def __repr__(self):
@@ -179,7 +184,7 @@ class Interpolator:
         for sh in self._shares.values():
             prod = Scalar(1)
             for other in self._shares.values():
-                diff = sh.x - other.x
+                diff = other.x - sh.x
                 if diff != 0:
                     prod *= other.x // diff
             sum += sh.y * prod
