@@ -5,6 +5,8 @@ SeedWarden vault: an encrypted list of items, see docs/vault-format.md.
 import hashlib
 import json
 import os
+import shutil
+import tempfile
 from abc import ABC, abstractmethod
 
 from cryptography.exceptions import InvalidTag
@@ -38,6 +40,20 @@ class VaultDecryptionError(VaultError):
 
 class VaultIntegrityError(VaultError):
     "The ciphertext does not match its sha256 checksum."
+
+
+def _fsync_directory(directory: str) -> None:
+    "Persist a rename in directory. Not supported on all platforms (e.g. Windows), skipped there."
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _aad(format: str, id: str) -> bytes:
@@ -265,10 +281,42 @@ class Vault:
         self.logins.append(ShamirLogin.create(share_set_id, secret, self._dek, self._aad))
         self.dirty = True
 
+    def list_logins(self) -> list[dict | Login]:
+        """
+        Logins of this vault, in file order. Indices match remove_login().
+        Unknown login types appear as raw dicts.
+        """
+        return list(self.logins)
+
+    def remove_login(self, index: int) -> None:
+        """
+        Remove a login. Note: the removed login's key still unwraps the DEK of older copies,
+        and of this vault unless rotate_key() is called.
+        """
+        del self.logins[index]
+        self.dirty = True
+
+    def rotate_key(self) -> None:
+        """
+        Generate a new DEK and drop all logins, because they wrap the old DEK.
+        Add logins again before saving, save refuses a vault without logins.
+        """
+        self._dek = os.urandom(32)
+        self.logins = []
+        self.dirty = True
+
     # ---------- save ----------
 
     def to_json(self) -> str:
         "Encrypt with a new nonce and serialize. Clears the dirty flag."
+        text = self._to_json()
+        self.dirty = False
+        return text
+
+    def _to_json(self) -> str:
+        "Encrypt with a new nonce and serialize. Refuses a vault without logins."
+        if not self.logins:
+            raise VaultError("A vault without logins could never be opened again.")
         payload = json.dumps({"items": [i.serialize() for i in self.items]}).encode("utf-8")
         nonce, ciphertext = _encrypt(self._dek, payload, self._aad)
         doc = {
@@ -280,14 +328,42 @@ class Vault:
             "ciphertext": Convert.bytes_to_base64str(ciphertext),
             "sha256": hashlib.sha256(ciphertext).hexdigest(),
         }
-        self.dirty = False
         return json.dumps(doc, indent=2)
 
     def save(self, path) -> None:
-        "Encrypt and write to path."
-        text = self.to_json()
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
+        """
+        Encrypt and write to path atomically.
+
+        1. Write to a temp file in the same directory, flush and fsync it.
+        2. Re-read the temp file and verify it parses and its sha256 matches.
+        3. Copy the existing file (if any) to `<name>.bak`, replacing an older .bak.
+        4. Replace the target with the temp file and fsync the directory.
+
+        If anything fails, the original file is left untouched. The .bak is kept.
+        """
+        path = os.fspath(path)
+        directory = os.path.dirname(os.path.abspath(path))
+        text = self._to_json()
+
+        fd, tmp = tempfile.mkstemp(prefix=".swtmp-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            with open(tmp, encoding="utf-8") as f:
+                if not Vault.verify_integrity(f.read()):
+                    raise VaultIntegrityError(f"Verification of {tmp} failed.")
+            if os.path.exists(path):
+                shutil.copy2(path, path + ".bak")
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+        _fsync_directory(directory)
+        self.dirty = False
 
     # ---------- open ----------
 

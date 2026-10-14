@@ -9,6 +9,7 @@ from seedwarden.models.vault import (
     Item,
     Vault,
     VaultDecryptionError,
+    VaultError,
     VaultFormatError,
 )
 
@@ -155,3 +156,74 @@ def test_save_and_open(tmp_path):
     path = tmp_path / "v.swvault"
     make_vault().save(path)
     assert Vault.open(path, credentials=Pbkdf.Credentials("password", "")).name == "test"
+
+
+def test_save_creates_bak_and_no_temp(tmp_path):
+    path = tmp_path / "v.swvault"
+    vault = make_vault()
+    vault.save(path)
+    first = path.read_text()
+    vault.rename("second")
+    vault.save(path)
+    assert not vault.dirty
+    assert (tmp_path / "v.swvault.bak").read_text() == first
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["v.swvault", "v.swvault.bak"]
+    assert Vault.open(path, credentials=Pbkdf.Credentials("password", "")).name == "second"
+
+
+def test_failed_save_keeps_original(tmp_path, monkeypatch):
+    path = tmp_path / "v.swvault"
+    vault = make_vault()
+    vault.save(path)
+    original = path.read_text()
+
+    def fail(fd):
+        raise OSError("simulated failure")
+
+    monkeypatch.setattr("os.fsync", fail)
+    vault.rename("changed")
+    with pytest.raises(OSError):
+        vault.save(path)
+    assert path.read_text() == original
+    assert vault.dirty
+    assert [p.name for p in tmp_path.iterdir()] == ["v.swvault"]
+
+
+def test_rotate_key(tmp_path):
+    path = tmp_path / "v.swvault"
+    vault = make_vault()
+    vault.save(path)
+    old = path.read_text()
+
+    vault.rotate_key()
+    assert vault.dirty and vault.list_logins() == []
+    vault.add_password_login(Pbkdf.Credentials("new", ""), fast_kdf())
+    vault.save(path)
+    new = path.read_text()
+
+    with pytest.raises(VaultDecryptionError):
+        Vault.unlock_with_password(new, Pbkdf.Credentials("password", ""))
+    assert Vault.unlock_with_password(new, Pbkdf.Credentials("new", "")).items[0].name == "wallet"
+    # rotation does not affect old copies
+    assert Vault.unlock_with_password(old, Pbkdf.Credentials("password", "")).items[0].name == "wallet"
+
+
+def test_remove_login():
+    poly = Polynomial(2)
+    vault = make_vault()
+    vault.add_shamir_login(poly.id, poly.secret)
+    vault.to_json()
+    vault.remove_login(0)
+    assert vault.dirty
+    assert [type(x).__name__ for x in vault.list_logins()] == ["ShamirLogin"]
+    with pytest.raises(VaultDecryptionError):
+        Vault.unlock_with_password(vault.to_json(), Pbkdf.Credentials("password", ""))
+
+
+def test_save_without_logins_raises(tmp_path):
+    vault = Vault.create("empty")
+    with pytest.raises(VaultError):
+        vault.to_json()
+    with pytest.raises(VaultError):
+        vault.save(tmp_path / "v.swvault")
+    assert list(tmp_path.iterdir()) == []

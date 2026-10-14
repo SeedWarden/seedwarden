@@ -66,6 +66,31 @@ Other header fields (name, KDF parameters, logins) are not authenticated: tamper
 - `sha256` is a convenience check for corruption and sync only. Security comes from the GCM tags.
 - Readers must reject an unknown `format` major version, and unknown login types are skipped.
 
+## Saving
+
+Saves are atomic, so a power loss or a pulled SD card never leaves a half-written vault:
+
+1. Write the new vault to a temp file in the same directory, flush and fsync it.
+2. Re-read the temp file and verify that it parses and that `sha256` matches.
+3. Copy the previous file, if any, to `<name>.bak`, replacing an older `.bak`.
+4. Rename the temp file over the target (atomic) and fsync the directory where the platform supports it.
+
+The `.bak` is never deleted automatically. It is a full vault and opens with the logins it had at that time.
+A vault without any login is never written, as it could not be opened again.
+
+## Key rotation
+
+Removing a login does not revoke it: its KEK still unwraps the unchanged DEK, e.g. from a copy that still contains the login.
+To revoke, rotate the key:
+
+1. Generate a new random DEK. All existing logins wrap the old DEK and are dropped.
+2. Add the logins that should remain (password, new Shamir share set, ...).
+3. Save. The payload is encrypted with the new DEK.
+
+Caveat: rotation only protects future versions of the vault.
+Old copies, backups (including `.bak` files and copies on a friend's card) and anyone who already decrypted the vault keep access to that old content.
+Delete the old copies and change the secrets themselves if that matters.
+
 ## Plaintext payload
 
 ```json
