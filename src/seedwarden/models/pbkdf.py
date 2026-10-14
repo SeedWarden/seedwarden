@@ -87,7 +87,7 @@ class PbkdfArgon2(Pbkdf):
         r._salt = os.urandom(16)
         r._time_cost = 3
         r._memory_cost = 64 * 1024
-        r._parallelism = 3
+        r._parallelism = 1  # Pi Zero has a single core
         r._hash_len = 32
         r._type = argon2.low_level.Type.ID
         r._version = argon2.low_level.ARGON2_VERSION
