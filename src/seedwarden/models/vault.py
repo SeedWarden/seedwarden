@@ -2,6 +2,8 @@
 SeedWarden vault: an encrypted list of items, see docs/vault-format.md.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
